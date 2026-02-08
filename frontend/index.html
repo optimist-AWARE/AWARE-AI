@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AWARE AI</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg"></div>
+
+  <!-- Loading Overlay -->
+  <div id="loading" class="loading hidden" aria-hidden="true">
+    <div class="loading-inner">
+      <div class="a-mark">
+        <div class="a-letter">A</div>
+        <div class="a-glow"></div>
+      </div>
+      <div class="loading-text">AI가 열심히 분석중...</div>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">AWARE AI</div>
+  </header>
+
+  <main class="wrap">
+    <!-- Screen 1: Upload -->
+    <section id="screen-upload" class="screen">
+      <div class="photo-frame">
+        <img id="preview-upload" alt="미리보기" class="photo hidden" />
+        <div id="placeholder" class="placeholder">사진을 올려주세요</div>
+      </div>
+
+      <div class="controls">
+        <input id="name" class="input" placeholder="이름 입력 (예: 예준)" maxlength="20" />
+        <div class="row">
+          <input id="file" type="file" accept="image/*" class="file" />
+        </div>
+
+        <button id="btn-analyze" class="btn primary" disabled>이 상태로 진단받기</button>
+      </div>
+    </section>
+
+    <!-- Screen 2: Result -->
+    <section id="screen-result" class="screen hidden">
+      <div class="photo-frame">
+        <img id="preview-result" class="photo" alt="원본" />
+      </div>
+
+      <div class="result">
+        <div class="title" id="result-title">OOO님의 결과</div>
+        <div class="score" id="result-score">- / 10 점</div>
+        <div class="vibe" id="result-vibe">-</div>
+
+        <p class="reason" id="result-reason"></p>
+
+        <div class="divider"></div>
+
+        <div class="section-title">스타일링 팁</div>
+        <ul id="tips" class="tips"></ul>
+
+        <div class="divider"></div>
+
+        <div class="section-title">추천 스타일 선택</div>
+        <div id="options" class="options"></div>
+
+        <button id="btn-go-styled" class="btn primary">스타일링 적용한 모습 확인하기</button>
+        <button id="btn-back-upload" class="btn ghost">처음부터 다시하기</button>
+      </div>
+    </section>
+
+    <!-- Screen 3: Styled -->
+    <section id="screen-styled" class="screen hidden">
+      <div class="photo-frame">
+        <img id="preview-styled" class="photo" alt="스타일링 결과" />
+      </div>
+
+      <div class="styled-panel">
+        <div class="section-title">생성된 스타일링</div>
+        <div id="thumbs" class="thumbs"></div>
+
+        <div class="custom">
+          <input id="custom-prompt" class="input" placeholder="원하는 스타일을 자연어로 입력 (예: 검은 뿔테안경, 시스루펌, 오버핏)" />
+          <button id="btn-custom" class="btn primary">이대로 다시 생성</button>
+        </div>
+
+        <div class="row">
+          <button id="btn-back-result" class="btn ghost">평가 화면으로 돌아가기</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
