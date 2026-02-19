@@ -1,3 +1,6 @@
+const APP_VERSION = "2026-02-20_04-10_reset-hardreload";
+console.log("[AWARE FRONT LOADED]", APP_VERSION, "href=", location.href);
+
 const API_BASE = "http://127.0.0.1:8000";
 
 const el = (id) => document.getElementById(id);
@@ -8,26 +11,15 @@ const screens = {
 };
 const loading = el("loading");
 
-// camera elements
-const video = el("camera");
-const canvas = el("camera-canvas");
-const cameraActions = el("camera-actions");
-const btnCameraStart = el("btn-camera-start");
-const btnCameraCapture = el("btn-camera-capture");
-const btnCameraStop = el("btn-camera-stop");
-
-let cameraStream = null;
-
 const state = {
   name: "000",
-  age: null,           // ✅ 추가
-  gender: null,        // ✅ 추가: "male" | "female" (둘 중 하나 선택)
   originalFile: null,
   originalUrl: null,
   analysis: null,
   selectedStyleKey: null,
 
   personKey: null,
+  generatedByPerson: new Map(),
   generated: [],
   selectedGeneratedId: null,
 };
@@ -38,7 +30,7 @@ function showLoading(on) {
 }
 
 function showScreen(which) {
-  Object.values(screens).forEach(s => s.classList.add("hidden"));
+  Object.values(screens).forEach((s) => s.classList.add("hidden"));
   screens[which].classList.remove("hidden");
 }
 
@@ -50,20 +42,18 @@ function setPreview(selectorId, url) {
 
 function enableAnalyzeButton() {
   const btn = el("btn-analyze");
-  // ✅ name은 없어도 되지만 사진은 필수, gender/age는 권장이라 필수로 잠그진 않음
   btn.disabled = !state.originalFile;
 }
 
-function clearGeneratedForCurrentPerson() {
-  state.generated.forEach(g => {
-    try { URL.revokeObjectURL(g.url); } catch {}
-  });
-  state.generated = [];
-  state.selectedGeneratedId = null;
-}
-
-function resetToUploadView() {
+function resetToUploadView(keepGenerated = true) {
   showScreen("upload");
+
+  if (!keepGenerated) {
+    state.analysis = null;
+    state.generated.forEach((g) => URL.revokeObjectURL(g.url));
+    state.generated = [];
+    state.selectedGeneratedId = null;
+  }
 }
 
 function renderResult() {
@@ -77,7 +67,7 @@ function renderResult() {
 
   const tips = el("tips");
   tips.innerHTML = "";
-  (a.styling_tips || []).forEach(t => {
+  (a.styling_tips || []).forEach((t) => {
     const li = document.createElement("li");
     li.textContent = t;
     tips.appendChild(li);
@@ -97,7 +87,7 @@ function renderResult() {
   const defaultKey = a.default_style_key || used[0].key;
   state.selectedStyleKey = state.selectedStyleKey || defaultKey;
 
-  used.forEach(opt => {
+  used.forEach((opt) => {
     const div = document.createElement("div");
     div.className = "opt" + (opt.key === state.selectedStyleKey ? " active" : "");
     div.dataset.key = opt.key;
@@ -120,7 +110,7 @@ function renderStyledThumbs() {
   const thumbs = el("thumbs");
   thumbs.innerHTML = "";
 
-  state.generated.forEach(g => {
+  state.generated.forEach((g) => {
     const div = document.createElement("div");
     div.className = "thumb" + (g.id === state.selectedGeneratedId ? " active" : "");
     div.title = g.title;
@@ -145,10 +135,6 @@ async function postAnalyze() {
   fd.append("image", state.originalFile);
   fd.append("name", state.name);
 
-  // ✅ 추가: age/gender 전달
-  if (state.age !== null) fd.append("age", String(state.age));
-  if (state.gender) fd.append("gender", state.gender); // "male" | "female"
-
   const res = await fetch(`${API_BASE}/api/analyze`, {
     method: "POST",
     body: fd,
@@ -165,10 +151,6 @@ async function postApply(editPrompt) {
   const fd = new FormData();
   fd.append("image", state.originalFile);
   fd.append("edit_prompt", editPrompt);
-
-  // (선택) 이미지 생성에도 age/gender를 같이 보내고 싶다면 백엔드에 추가한 뒤 아래 주석 해제
-  // if (state.age !== null) fd.append("age", String(state.age));
-  // if (state.gender) fd.append("gender", state.gender);
 
   const res = await fetch(`${API_BASE}/api/apply`, {
     method: "POST",
@@ -187,149 +169,59 @@ async function postApply(editPrompt) {
 
 function getSelectedOption() {
   const a = state.analysis;
-
-  const fallback = [
-    { key: "clean", title: "클린", summary: "단정하고 밝은 프로필 톤", edit_prompt: "깔끔한 조명과 단정한 헤어로 정리. 배경은 심플." },
-    { key: "street", title: "스트릿", summary: "힙한 캐주얼 무드", edit_prompt: "스트릿 캐주얼 무드. 오버핏 느낌, 색감 세련되게." },
-    { key: "formal", title: "포멀", summary: "정돈된 포멀 프로필", edit_prompt: "포멀한 프로필 톤. 차분하고 단정하게." },
-  ];
-
-  const used = (a && Array.isArray(a.style_options) && a.style_options.length)
-    ? a.style_options
-    : fallback;
-
-  return used.find(o => o.key === state.selectedStyleKey) || used[0];
+  if (!a || !Array.isArray(a.style_options)) return null;
+  return a.style_options.find((o) => o.key === state.selectedStyleKey) || a.style_options[0] || null;
 }
 
-function makePersonKey() {
-  return `p_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+function makePersonKey(file) {
+  return `${file.name}_${file.size}_${file.lastModified}`;
 }
 
-function setNewOriginalFile(file) {
-  clearGeneratedForCurrentPerson();
-
-  state.personKey = makePersonKey();
-  state.originalFile = file;
-
+function resetCurrentPersonHistory() {
   state.analysis = null;
   state.selectedStyleKey = null;
   state.selectedGeneratedId = null;
-
-  if (state.originalUrl) {
-    try { URL.revokeObjectURL(state.originalUrl); } catch {}
-  }
-  state.originalUrl = URL.createObjectURL(file);
-
-  el("placeholder").classList.add("hidden");
-
-  video.classList.add("hidden");
-  el("preview-upload").classList.remove("hidden");
-  setPreview("preview-upload", state.originalUrl);
-
-  enableAnalyzeButton();
 }
 
-function showCameraUI(on) {
-  cameraActions.classList.toggle("hidden", !on);
-  btnCameraStart.classList.toggle("hidden", on);
+function forceHardReload(reason = "manual-reset") {
+  // ✅ “진짜 새로고침”이 됐는지 확인용 로그
+  console.log("[HARD RELOAD TRIGGERED]", reason, "version=", APP_VERSION);
+
+  // ✅ 캐시/복원(BackForwardCache)까지 피하려고 URL에 랜덤 쿼리 붙여서 로드
+  const base = location.origin + location.pathname;
+  const next = `${base}?reload=${Date.now()}&reason=${encodeURIComponent(reason)}`;
+  location.replace(next);
 }
 
-async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user" },
-    audio: false,
-  });
-  cameraStream = stream;
-  video.srcObject = stream;
-  await video.play();
+/* ----------------------------
+   이벤트 바인딩
+---------------------------- */
 
-  el("placeholder").classList.add("hidden");
-  el("preview-upload").classList.add("hidden");
-  video.classList.remove("hidden");
-  showCameraUI(true);
-}
-
-function stopCamera() {
-  if (cameraStream) {
-    cameraStream.getTracks().forEach(t => t.stop());
-    cameraStream = null;
-  }
-  video.srcObject = null;
-  showCameraUI(false);
-
-  if (state.originalUrl) {
-    el("placeholder").classList.add("hidden");
-    el("preview-upload").classList.remove("hidden");
-    video.classList.add("hidden");
-    setPreview("preview-upload", state.originalUrl);
-  } else {
-    video.classList.add("hidden");
-    el("preview-upload").classList.add("hidden");
-    el("placeholder").classList.remove("hidden");
-  }
-}
-
-async function captureFromCamera() {
-  if (!video || video.classList.contains("hidden")) return;
-
-  const w = video.videoWidth;
-  const h = video.videoHeight;
-  if (!w || !h) {
-    alert("카메라 준비 중이에요. 잠시 후 다시 촬영해줘.");
-    return;
-  }
-
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0, w, h);
-
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
-  if (!blob) {
-    alert("촬영 실패: blob 생성에 실패했어.");
-    return;
-  }
-
-  const file = new File([blob], `capture_${Date.now()}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
-  setNewOriginalFile(file);
-  stopCamera();
-}
-
-// ------------------
-// Gender buttons
-// ------------------
-function setGender(g) {
-  state.gender = g; // "male" | "female"
-  el("gender-m").classList.toggle("active", g === "male");
-  el("gender-f").classList.toggle("active", g === "female");
-}
-el("gender-m").addEventListener("click", () => setGender("male"));
-el("gender-f").addEventListener("click", () => setGender("female"));
-
-// ------------------
-// Events
-// ------------------
 el("file").addEventListener("change", (e) => {
   const file = e.target.files?.[0] || null;
   if (!file) return;
-  stopCamera();
-  setNewOriginalFile(file);
+
+  state.originalFile = file;
+
+  state.personKey = makePersonKey(file);
+
+  if (!state.generatedByPerson.has(state.personKey)) {
+    state.generatedByPerson.set(state.personKey, []);
+  }
+  state.generated = state.generatedByPerson.get(state.personKey);
+
+  resetCurrentPersonHistory();
+
+  if (state.originalUrl) URL.revokeObjectURL(state.originalUrl);
+  state.originalUrl = URL.createObjectURL(file);
+
+  el("placeholder").classList.add("hidden");
+  setPreview("preview-upload", state.originalUrl);
+  enableAnalyzeButton();
 });
 
 el("name").addEventListener("input", (e) => {
   state.name = (e.target.value || "000").trim() || "000";
-});
-
-el("age").addEventListener("input", (e) => {
-  const raw = (e.target.value || "").replace(/[^\d]/g, "");
-  e.target.value = raw;
-  if (!raw) {
-    state.age = null;
-    return;
-  }
-  const n = Number(raw);
-  // 너무 비정상 값은 입력만 받고 서버에 안 보내도 됨(여기선 간단히 클램프)
-  state.age = Math.max(1, Math.min(120, n));
 });
 
 el("btn-analyze").addEventListener("click", async () => {
@@ -338,10 +230,12 @@ el("btn-analyze").addEventListener("click", async () => {
   showLoading(true);
   try {
     state.analysis = await postAnalyze();
+
     setPreview("preview-result", state.originalUrl);
 
     state.selectedStyleKey = state.analysis.default_style_key || "clean";
     renderResult();
+
     showScreen("result");
   } catch (err) {
     console.error(err);
@@ -351,25 +245,27 @@ el("btn-analyze").addEventListener("click", async () => {
   }
 });
 
-el("btn-back-upload").addEventListener("click", () => {
-  resetToUploadView();
-  if (state.originalUrl) {
-    el("placeholder").classList.add("hidden");
-    setPreview("preview-upload", state.originalUrl);
-    enableAnalyzeButton();
-  }
+// ✅ “처음부터 다시하기” 버튼들: 전부 ‘강제 새로고침’으로 통일
+["btn-back-upload", "btn-back-upload-2", "btn-back-upload-3"].forEach((id) => {
+  const btn = el(id);
+  if (!btn) return;
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    forceHardReload(id);
+  });
 });
 
-el("btn-view-generated").addEventListener("click", () => {
-  if (!state.generated.length) {
-    alert("아직 생성된 이미지가 없어요. '스타일링 적용 이미지 생성하기'로 먼저 생성해줘!");
-    return;
-  }
-  const selected = state.generated.find(g => g.id === state.selectedGeneratedId) || state.generated[0];
-  state.selectedGeneratedId = selected.id;
-  setPreview("preview-styled", selected.url);
-  renderStyledThumbs();
-  showScreen("styled");
+// 결과/스타일 화면에서 “돌아가기”는 화면만 전환
+el("btn-back-result").addEventListener("click", () => {
+  setPreview("preview-result", state.originalUrl);
+  renderResult();
+  showScreen("result");
+});
+
+el("btn-back-result-2").addEventListener("click", () => {
+  setPreview("preview-result", state.originalUrl);
+  renderResult();
+  showScreen("result");
 });
 
 el("btn-go-styled").addEventListener("click", async () => {
@@ -379,7 +275,7 @@ el("btn-go-styled").addEventListener("click", async () => {
     return;
   }
 
-  const existing = state.generated.find(g => g.key === opt.key);
+  const existing = state.generated.find((g) => g.key === opt.key);
   if (existing) {
     state.selectedGeneratedId = existing.id;
     setPreview("preview-styled", existing.url);
@@ -404,6 +300,7 @@ el("btn-go-styled").addEventListener("click", async () => {
     state.selectedGeneratedId = id;
     setPreview("preview-styled", url);
     renderStyledThumbs();
+
     showScreen("styled");
   } catch (err) {
     console.error(err);
@@ -442,39 +339,4 @@ el("btn-custom").addEventListener("click", async () => {
   } finally {
     showLoading(false);
   }
-});
-
-el("btn-back-result").addEventListener("click", () => {
-  setPreview("preview-result", state.originalUrl);
-  renderResult();
-  showScreen("result");
-});
-
-// Camera
-btnCameraStart.addEventListener("click", async () => {
-  try {
-    await startCamera();
-  } catch (e) {
-    console.error(e);
-    alert("카메라를 켤 수 없어요. 브라우저 권한(카메라 허용)과 https/localhost 환경을 확인해줘.");
-  }
-});
-
-btnCameraCapture.addEventListener("click", async () => {
-  try {
-    await captureFromCamera();
-  } catch (e) {
-    console.error(e);
-    alert("촬영 실패: " + String(e.message || e));
-  }
-});
-
-btnCameraStop.addEventListener("click", () => stopCamera());
-
-window.addEventListener("beforeunload", () => {
-  stopCamera();
-  if (state.originalUrl) {
-    try { URL.revokeObjectURL(state.originalUrl); } catch {}
-  }
-  clearGeneratedForCurrentPerson();
 });
