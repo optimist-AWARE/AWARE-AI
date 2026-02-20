@@ -1,7 +1,7 @@
 const APP_VERSION = "2026-02-20_04-10_reset-hardreload";
 console.log("[AWARE FRONT LOADED]", APP_VERSION, "href=", location.href);
 
-const API_BASE = "http://3.39.252.231";
+const API_BASE = "https://3.39.252.231";
 
 const el = (id) => document.getElementById(id);
 const screens = {
