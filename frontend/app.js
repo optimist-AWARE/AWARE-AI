@@ -13,6 +13,8 @@ const loading = el("loading");
 
 const state = {
   name: "000",
+  gender: null,
+  age: null,
   originalFile: null,
   originalUrl: null,
   analysis: null,
@@ -43,17 +45,6 @@ function setPreview(selectorId, url) {
 function enableAnalyzeButton() {
   const btn = el("btn-analyze");
   btn.disabled = !state.originalFile;
-}
-
-function resetToUploadView(keepGenerated = true) {
-  showScreen("upload");
-
-  if (!keepGenerated) {
-    state.analysis = null;
-    state.generated.forEach((g) => URL.revokeObjectURL(g.url));
-    state.generated = [];
-    state.selectedGeneratedId = null;
-  }
 }
 
 function renderResult() {
@@ -134,6 +125,8 @@ async function postAnalyze() {
   const fd = new FormData();
   fd.append("image", state.originalFile);
   fd.append("name", state.name);
+  if (state.gender) fd.append("gender", state.gender);
+  if (state.age !== null) fd.append("age", state.age);
 
   const res = await fetch(`${API_BASE}/api/analyze`, {
     method: "POST",
@@ -224,6 +217,90 @@ el("name").addEventListener("input", (e) => {
   state.name = (e.target.value || "000").trim() || "000";
 });
 
+el("age").addEventListener("input", (e) => {
+  const v = parseInt(e.target.value, 10);
+  state.age = Number.isNaN(v) ? null : v;
+});
+
+/* --- 카메라 촬영 --- */
+let cameraStream = null;
+
+function stopCamera() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((t) => t.stop());
+    cameraStream = null;
+  }
+  el("camera").srcObject = null;
+  el("camera").classList.add("hidden");
+  el("camera-actions").classList.add("hidden");
+  el("btn-camera-start").classList.remove("hidden");
+}
+
+el("btn-camera-start").addEventListener("click", async () => {
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user" },
+      audio: false,
+    });
+    const video = el("camera");
+    video.srcObject = cameraStream;
+    video.classList.remove("hidden");
+    el("placeholder").classList.add("hidden");
+    el("preview-upload").classList.add("hidden");
+    el("camera-actions").classList.remove("hidden");
+    el("btn-camera-start").classList.add("hidden");
+  } catch (err) {
+    console.error(err);
+    alert("카메라를 사용할 수 없습니다: " + (err.message || err));
+  }
+});
+
+el("btn-camera-capture").addEventListener("click", () => {
+  const video = el("camera");
+  const canvas = el("camera-canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const file = new File([blob], `capture-${Date.now()}.jpg`, { type: "image/jpeg" });
+
+    state.originalFile = file;
+    state.personKey = makePersonKey(file);
+    if (!state.generatedByPerson.has(state.personKey)) {
+      state.generatedByPerson.set(state.personKey, []);
+    }
+    state.generated = state.generatedByPerson.get(state.personKey);
+    resetCurrentPersonHistory();
+
+    if (state.originalUrl) URL.revokeObjectURL(state.originalUrl);
+    state.originalUrl = URL.createObjectURL(file);
+
+    stopCamera();
+    setPreview("preview-upload", state.originalUrl);
+    enableAnalyzeButton();
+  }, "image/jpeg", 0.92);
+});
+
+el("btn-camera-stop").addEventListener("click", () => {
+  stopCamera();
+  if (state.originalUrl) {
+    setPreview("preview-upload", state.originalUrl);
+  } else {
+    el("placeholder").classList.remove("hidden");
+  }
+});
+
+["gender-m", "gender-f"].forEach((id) => {
+  el(id).addEventListener("click", () => {
+    const value = id === "gender-m" ? "male" : "female";
+    state.gender = state.gender === value ? null : value;
+    el("gender-m").classList.toggle("active", state.gender === "male");
+    el("gender-f").classList.toggle("active", state.gender === "female");
+  });
+});
+
 el("btn-analyze").addEventListener("click", async () => {
   if (!state.originalFile) return;
 
@@ -246,7 +323,7 @@ el("btn-analyze").addEventListener("click", async () => {
 });
 
 // ✅ “처음부터 다시하기” 버튼들: 전부 ‘강제 새로고침’으로 통일
-["btn-back-upload", "btn-back-upload-2", "btn-back-upload-3"].forEach((id) => {
+["btn-back-upload"].forEach((id) => {
   const btn = el(id);
   if (!btn) return;
   btn.addEventListener("click", (e) => {
@@ -262,10 +339,17 @@ el("btn-back-result").addEventListener("click", () => {
   showScreen("result");
 });
 
-el("btn-back-result-2").addEventListener("click", () => {
-  setPreview("preview-result", state.originalUrl);
-  renderResult();
-  showScreen("result");
+el("btn-view-generated").addEventListener("click", () => {
+  if (!state.generated.length) {
+    alert("아직 생성된 이미지가 없습니다.");
+    return;
+  }
+  const last = state.generated[state.generated.length - 1];
+  state.selectedGeneratedId = state.selectedGeneratedId || last.id;
+  const sel = state.generated.find((g) => g.id === state.selectedGeneratedId) || last;
+  setPreview("preview-styled", sel.url);
+  renderStyledThumbs();
+  showScreen("styled");
 });
 
 el("btn-go-styled").addEventListener("click", async () => {

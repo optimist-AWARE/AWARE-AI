@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from pydantic import BaseModel, Field
 from PIL import Image
@@ -426,3 +427,9 @@ def apply_style(
     except Exception as e:
         debug_text = getattr(response, "text", None)
         raise HTTPException(status_code=500, detail=f"이미지 추출 실패: {repr(e)} / response.text={debug_text}")
+
+
+# -------------------------
+# Static Files (frontend)
+# -------------------------
+app.mount("/", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "frontend"), html=True), name="frontend")
