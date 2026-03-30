@@ -491,6 +491,8 @@ async function postAnalyze() {
   const fd = new FormData();
   fd.append("image", state.originalFile);
   fd.append("name", state.name);
+  if (state.gender) fd.append("gender", state.gender);
+  if (state.age !== null) fd.append("age", state.age);
 
   const res = await fetch(`${API_BASE}/api/analyze`, {
     method: "POST",
