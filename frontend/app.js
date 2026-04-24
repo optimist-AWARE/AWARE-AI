@@ -179,6 +179,7 @@ function updateTipApplyButton() {}
 function resetAll() {
   // 카메라 중단
   stopCamera();
+  hideCameraGuide();
 
   // URL 해제
   if (state.originalUrl) {
@@ -238,7 +239,11 @@ function resetAll() {
   // Screen 3 커스텀 UI 초기화
   el("base-original").classList.add("active");
   el("base-current").classList.remove("active");
-  document.querySelectorAll(".cat-tag").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".cat-tag").forEach(b => {
+    b.classList.remove("active");
+    b.style.display = "";
+    b.setAttribute("aria-checked", "false");
+  });
 
   // styled 화면 placeholder 복원
   const styledImg = el("preview-styled");
@@ -267,7 +272,7 @@ function renderResult() {
   const a = state.analysis;
   if (!a) return;
 
-  el("result-title").textContent = `${a.name}님의 외모는`;
+  el("result-title").textContent = `${a.name}님의 스타일링 점수는`;
   el("result-score").textContent = `${a.style_score}점 (10점 만점)`;
   el("result-vibe").textContent = a.vibe;
   el("result-reason").textContent = a.vibe_reason || "";
@@ -356,6 +361,33 @@ function renderShoppingSection() {
   if (container) container.innerHTML = "";
 }
 
+const PART_TO_CATS = {
+  "얼굴":    ["헤어스타일", "안경", "메이크업"],
+  "목":      ["악세사리"],   // 목걸이
+  "상체":    ["상의", "아우터"],
+  "손목/팔": ["악세사리"],   // 시계·팔찌
+  "하체":    ["하의"],
+  "신발":    ["신발"],
+};
+
+function updateCatTagsVisibility() {
+  const visibleParts = state.analysis?.visible_parts;
+  if (!visibleParts || !visibleParts.length) return; // 정보 없으면 전부 표시 유지
+
+  const allowed = new Set(visibleParts.flatMap(p => PART_TO_CATS[p] || []));
+
+  document.querySelectorAll(".cat-tag").forEach(btn => {
+    const cat = btn.dataset.cat;
+    const show = allowed.has(cat);
+    btn.style.display = show ? "" : "none";
+    if (!show) {
+      state.selectedCategories = state.selectedCategories.filter(c => c !== cat);
+      btn.classList.remove("active");
+      btn.setAttribute("aria-checked", "false");
+    }
+  });
+}
+
 async function fetchShoppingSets(analysisResult) {
   if (!analysisResult?.style_options?.length) return;
 
@@ -369,6 +401,7 @@ async function fetchShoppingSets(analysisResult) {
       body: JSON.stringify({
         style_options: analysisResult.style_options,
         gender: state.gender,
+        visible_parts: analysisResult.visible_parts || null,
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -599,8 +632,32 @@ function makePersonKey(file) {
   return `${file.name}_${file.size}_${file.lastModified}`;
 }
 
+function showCameraGuide() {
+  el("placeholder").classList.add("hidden");
+  el("preview-upload").classList.add("hidden");
+  cameraVideo.classList.add("hidden");
+  el("camera-permission-guide").classList.remove("hidden");
+}
+
+function hideCameraGuide() {
+  el("camera-permission-guide").classList.add("hidden");
+}
+
 // Camera (mirror like selfie)
 async function startCamera() {
+  hideCameraGuide();
+
+  // 권한 상태 사전 확인 (지원하는 브라우저만)
+  try {
+    const perm = await navigator.permissions.query({ name: "camera" });
+    if (perm.state === "denied") {
+      showCameraGuide();
+      return;
+    }
+  } catch (_) {
+    // permissions API 미지원 브라우저는 getUserMedia에서 직접 처리
+  }
+
   try {
     camStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "user" },
@@ -616,7 +673,13 @@ async function startCamera() {
     el("camera-actions").classList.remove("hidden");
     btnCamStart.classList.add("hidden");
   } catch (e) {
-    alert("카메라 권한/장치를 확인해줘: " + e);
+    if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") {
+      showCameraGuide();
+    } else if (e.name === "NotFoundError") {
+      alert("카메라 장치를 찾을 수 없습니다.");
+    } else {
+      alert("카메라를 시작할 수 없습니다: " + e.message);
+    }
   }
 }
 
@@ -629,6 +692,7 @@ function stopCamera() {
   cameraVideo.classList.add("hidden");
   el("camera-actions").classList.add("hidden");
   btnCamStart.classList.remove("hidden");
+  hideCameraGuide();
 
   // 사진이 없으면 placeholder 복구
   if (!state.originalFile) {
@@ -686,6 +750,7 @@ function takePhotoFromCamera() {
 btnCamStart?.addEventListener("click", startCamera);
 btnCamStop?.addEventListener("click", stopCamera);
 btnCamShot?.addEventListener("click", takePhotoFromCamera);
+el("btn-camera-retry")?.addEventListener("click", startCamera);
 
 el("file").addEventListener("change", (e) => {
   const file = e.target.files?.[0] || null;
@@ -752,6 +817,7 @@ el("btn-analyze").addEventListener("click", async () => {
     state.selectedStyleKey = state.analysis.default_style_key || "clean";
     state.selectedShoppingSetKey = state.selectedStyleKey;
     renderResult();
+    updateCatTagsVisibility();
 
     document.title = `${state.analysis.name}님의 진단 결과 | AWARE AI`;
     showScreen("result");

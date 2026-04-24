@@ -34,11 +34,10 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3-flash-preview")
 # "나노바나나" 계열은 계정/프로젝트에 따라 모델명이 다를 수 있어 env로 바꿀 수 있게 둠
 IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
-# 예: Gemini 3 Pro Image preview를 쓰고 싶으면 아래처럼 env에 설정:
-# GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview  (Gemini 3 문서에 표기된 이미지 모델) :contentReference[oaicite:1]{index=1}
 openai.api_key = os.getenv("OPENAI_API_KEY")
 openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 GPT_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
 
 NAVER_CLIENT_ID     = os.getenv("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
@@ -280,6 +279,7 @@ class AnalyzeResult(BaseModel):
     style_score: float = Field(ge=0, le=10, description="스타일/프로필 완성도 점수 (0~10, 소수 1자리)")
     vibe: str
     vibe_reason: str
+    visible_parts: List[str] = Field(default_factory=lambda: ["얼굴", "상체", "하체", "신발"], description="사진에서 실제로 보이는 신체/의상 영역")
     styling_tips: List[str]
     style_options: List[StyleOption]
     default_style_key: str = Field(description="style_options 중 추천 스타일의 key")
@@ -294,6 +294,7 @@ class StyleOptionInput(BaseModel):
 class ShoppingRequest(BaseModel):
     style_options: list[StyleOptionInput]
     gender: Optional[str] = None  # 'm' | 'f' | None
+    visible_parts: Optional[List[str]] = None  # ["얼굴","상체","하체","신발"]
 
 class ShoppingItem(BaseModel):
     category: str   # '상의' | '하의' | '원피스' | '신발' | '악세사리'
@@ -435,7 +436,20 @@ A plain t-shirt and jeans with no accessories is a 4~5, not an 8."""
         '  "style_score": number (0~10, 소수1자리. 시스템 프롬프트의 5개 기준 각 0~2점 합산. 평범한 캐주얼은 4~6점대. 8점 이상은 진짜 잘 입은 경우만),\n'
         '  "vibe": string (예: 강아지상/고양이상/사슴상/여우상/곰상/토끼상/공룡상 등등 가장 닮은 동물을 한가지 골라 출력),\n'  # 프롬프트 엔지니어링 사용됨 — 선택지 제한(Constrained Choice)
         '  "vibe_reason": string (긍정적/중립적으로 1~2문장),\n'
-        '  "styling_tips": string[] (4~6개, 선택형 팁: 헤어/안경/의상/피부상태 등),\n'
+        '  "visible_parts": string[] (사진에서 실제로 보이는 신체 부위만 포함. 가능한 값 6가지: '
+        '"얼굴"(얼굴·헤어·귀 보임), '
+        '"목"(목 부분이 보임 — 목걸이 착용 가능 영역), '
+        '"상체"(가슴·배·어깨 등 상반신 보임 — 상의·아우터 착용 영역), '
+        '"손목/팔"(손목·손·팔뚝이 보임 — 시계·팔찌 착용 가능 영역), '
+        '"하체"(허리 아래 하반신 보임 — 하의 착용 영역), '
+        '"신발"(발·신발이 보임). '
+        '얼굴+어깨 셀카 → ["얼굴","목","상체"], 전신샷 → ["얼굴","목","상체","손목/팔","하체","신발"]. '
+        '손목이 보이지 않으면 "손목/팔" 절대 포함 금지.),\n'
+        '  "styling_tips": string[] (4~6개. visible_parts에 포함된 부위에 대해서만 팁 제공. '
+        '부위별 허용 팁: "얼굴"→헤어·안경·메이크업, "목"→목걸이, "상체"→상의·아우터, "손목/팔"→시계·팔찌, "하체"→하의, "신발"→신발. '
+        '보이지 않는 부위(손목/팔이 없으면 시계·팔찌·팔찌 팁 금지, 하체가 없으면 바지 팁 금지 등) 절대 언급 금지. '
+        '각 팁은 "[이유/효과] 때문에/위해 [구체적 조언]" 형식으로 이유를 먼저 쓰고 조언을 이어서 써. '
+        '예: "얼굴이 갸름해 보이는 효과를 위해 앞머리를 내리거나 옆 가르마를 시도해보세요"),\n'
         '  "style_options": [\n'
         '    {"key":string,"title":string,"summary":string,"edit_prompt":string},\n'  # 프롬프트 엔지니어링 사용됨 — AI 자율 생성(Open-ended Generation)
         '    ... (정확히 5개, 사진 속 인물에게 가장 어울리는 스타일 5가지를 AI가 자유롭게 제안)\n'
@@ -529,11 +543,49 @@ A plain t-shirt and jeans with no accessories is a 4~5, not an 8."""
             )
 
 
+PART_TO_SHOP_CATEGORIES = {
+    "얼굴":    [],                    # 헤어·안경은 쇼핑 키워드 생성 제외
+    "목":      ["목걸이"],
+    "상체":    ["상의", "아우터"],
+    "손목/팔": ["시계", "팔찌"],
+    "하체":    ["하의", "원피스"],
+    "신발":    ["신발"],
+}
+
+ALL_SHOP_CATEGORIES = ["상의", "아우터", "하의", "원피스", "신발", "목걸이", "시계", "팔찌"]
+
+
+def _allowed_shop_categories(visible_parts: Optional[List[str]]) -> List[str]:
+    if not visible_parts:
+        return ALL_SHOP_CATEGORIES
+    cats: List[str] = []
+    for part in visible_parts:
+        cats.extend(PART_TO_SHOP_CATEGORIES.get(part, []))
+    return list(dict.fromkeys(cats))  # 중복 제거, 순서 유지
+
+
 @app.post("/api/shopping", response_model=ShoppingResponse)
 async def shopping(req: ShoppingRequest):
     import asyncio
 
     gender_label = "남성" if req.gender == "m" else "여성" if req.gender == "f" else ""
+
+    allowed_cats = _allowed_shop_categories(req.visible_parts)
+    has_lower = "하의" in allowed_cats or "원피스" in allowed_cats
+    has_shoes = "신발" in allowed_cats
+
+    cat_rules = []
+    if has_lower:
+        cat_rules.append("separates(상하의 분리) 또는 onepiece(원피스/점프수트) 중 하나 선택 가능.")
+        cat_rules.append(f"separates이면: 상의 필수, 하의 필수. 어울리면 {'신발, ' if has_shoes else ''}악세사리 중 추가 가능.")
+        cat_rules.append(f"onepiece이면: 원피스 1개 필수. {'신발, ' if has_shoes else ''}악세사리 추가 가능.")
+    else:
+        cat_rules.append("상체만 보이는 사진이므로 type은 반드시 'separates'로 설정.")
+        cat_rules.append(f"포함 가능한 카테고리: {', '.join(allowed_cats)}. 이 외 카테고리(하의·원피스·신발 등)는 절대 포함 금지.")
+
+    cat_rules_text = "\n".join(f"{i+1}. {r}" for i, r in enumerate(cat_rules))
+    cat_rules_text += f"\n{len(cat_rules)+1}. 키워드는 네이버 쇼핑 검색에 최적화된 한국어. 예: '남성 오버핏 블랙 자켓'"
+    cat_rules_text += f"\n{len(cat_rules)+2}. 최대 아이템 수는 4개."
 
     style_list_text = "\n".join([
         f"- key: {opt.key}, title: {opt.title}, summary: {opt.summary}"
@@ -543,16 +595,13 @@ async def shopping(req: ShoppingRequest):
     keyword_prompt = f"""당신은 패션 스타일리스트입니다.
 아래 스타일 옵션별로 네이버 쇼핑 검색에 쓸 키워드 세트를 만들어 주세요.
 성별: {gender_label if gender_label else "미지정"}
+사진에서 보이는 부위: {', '.join(req.visible_parts) if req.visible_parts else '전체'}
 
 스타일 목록:
 {style_list_text}
 
 규칙:
-1. 각 스타일은 separates(상하의 분리) 또는 onepiece(원피스/점프수트 일체형) 중 하나.
-2. separates이면: 상의, 하의 필수. 스타일에 어울리면 신발, 악세사리 중 1~2개 추가.
-3. onepiece이면: 원피스 1개 필수. 신발, 악세사리 중 1~2개 추가.
-4. 키워드는 네이버 쇼핑 검색에 최적화된 한국어. 예: '남성 오버핏 블랙 자켓'
-5. 최대 아이템 수는 4개.
+{cat_rules_text}
 
 JSON만 출력. 설명 없음. 마크다운 없음.
 형식:
@@ -561,8 +610,7 @@ JSON만 출력. 설명 없음. 마크다운 없음.
     "type": "separates",
     "items": [
       {{"category": "상의", "keyword": "남성 블랙 오버핏 자켓"}},
-      {{"category": "하의", "keyword": "남성 블랙 슬랙스"}},
-      {{"category": "신발", "keyword": "남성 더비슈즈 블랙"}}
+      {{"category": "악세사리", "keyword": "남성 실버 체인 목걸이"}}
     ]
   }}
 }}"""

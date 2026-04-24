@@ -89,6 +89,18 @@ body{
   padding:18px;
   text-align:center;
 }
+.camera-guide{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  padding:20px 16px;
+  text-align:center;
+  gap:6px;
+}
+.camera-guide-icon{ font-size:32px; }
+.camera-guide-title{ font-size:15px; font-weight:700; color:var(--text); }
+.camera-guide-desc{ font-size:13px; color:var(--muted); line-height:1.7; }
 .styled-placeholder-icon{
   font-size:36px;
   margin-bottom:8px;
