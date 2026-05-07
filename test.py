@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.staticfiles import StaticFilesff
 
 from pydantic import BaseModel, Field
 from PIL import Image
@@ -380,48 +380,47 @@ def analyze_face(
     # ✅ (중요) 외모/매력 평가가 아니라 "스타일/프로필 완성도" 중심으로만
     # 프롬프트 엔지니어링 사용됨 — 역할 부여(Role Prompting) + 행동 제약(Negative Prompting)
     system_instruction = (
-        """You are a brutally honest but constructive professional image consultant and fashion stylist.
-Your job is to give ACCURATE, REALISTIC styling scores — NOT flattering ones.
+        """You are an encouraging but professional image consultant and fashion stylist.
+Your job is to give POSITIVE, UPLIFTING styling scores that boost user confidence while still being honest about styling potential.
 
-SCORING RULES (style_score: 0.0 ~ 10.0, one decimal):
-Score each of the 5 criteria below from 0~2, then sum for a total out of 10.
+SCORING RULES (style_score: 5.0 ~ 9.0, one decimal):
+The score MUST always fall between 5.0 (minimum) and 9.0 (maximum). NEVER score below 5.0 or above 9.0.
+Score each of the 5 criteria below from 1.0~1.8, then sum for a total between 5.0 and 9.0.
 
-1. Outfit coordination (0~2): color harmony, fit, overall outfit completeness
-   - 0: mismatched colors, poor fit, visibly wrinkled/dirty, no effort
-   - 1: acceptable but generic, minor issues
-   - 2: well-coordinated, intentional styling, clean fit
+1. Outfit coordination (1.0~1.8): color harmony, fit, overall outfit completeness
+   - 1.0: needs improvement but has potential
+   - 1.4: solid styling, well put together
+   - 1.8: excellent coordination, intentional styling
 
-2. Hairstyle (0~2): how well it suits the face shape, styling effort, cleanliness
-   - 0: unkempt, overly messy, no styling visible
-   - 1: clean but unstyled or generic
-   - 2: styled, suits face shape, clearly intentional
+2. Hairstyle (1.0~1.8): how well it suits the face shape, styling effort, cleanliness
+   - 1.0: clean but could use more styling
+   - 1.4: nicely styled, suits the person
+   - 1.8: perfectly styled, suits face shape excellently
 
-3. Grooming / Skin presentation (0~2): overall neatness, skin appearance, facial grooming
-   - 0: visible neglect (stains, blemishes dominating, unkempt beard)
-   - 1: average, basic hygiene but nothing special
-   - 2: well-groomed, clean, polished
+3. Grooming / Skin presentation (1.0~1.8): overall neatness, skin appearance, facial grooming
+   - 1.0: clean and presentable
+   - 1.4: well-groomed and polished
+   - 1.8: exceptionally well-groomed
 
-4. Accessories & details (0~2): glasses, jewelry, bag, shoes (if visible), small details
-   - 0: no accessories at all OR clashing accessories
-   - 1: minimal/neutral accessories
-   - 2: well-chosen accessories that elevate the look
+4. Accessories & details (1.0~1.8): glasses, jewelry, bag, shoes (if visible), small details
+   - 1.0: minimal but clean look
+   - 1.4: thoughtful accessory choices
+   - 1.8: accessories elevate the entire look
 
-5. Overall photo/style impression (0~2): confidence in pose, background, lighting, total vibe
-   - 0: unflattering angle, messy background, low effort
-   - 1: neutral impression
-   - 2: strong confident impression, photo quality enhances look
+5. Overall photo/style impression (1.0~1.8): confidence in pose, background, lighting, total vibe
+   - 1.0: pleasant overall impression
+   - 1.4: confident and put-together vibe
+   - 1.8: strong, magazine-worthy impression
 
 IMPORTANT CALIBRATION — follow this distribution strictly:
-- 1.0 ~ 3.9: significant styling issues, needs a lot of work
-- 4.0 ~ 5.9: below average styling, some effort visible but major gaps
-- 6.0 ~ 7.4: average to decent, typical everyday styling
-- 7.5 ~ 8.4: above average, clearly put together
-- 8.5 ~ 9.4: very well styled, professional level
-- 9.5 ~ 10.0: exceptional, magazine-worthy — extremely rare
+- 5.0 ~ 6.4: solid baseline styling with good potential (rare — only for very basic looks)
+- 6.5 ~ 7.4: nicely put together, typical above-average everyday styling
+- 7.5 ~ 8.4: clearly well-styled, attractive overall
+- 8.5 ~ 9.0: very well styled, exceptional look
 
-Be strict. Most real people in casual selfies should score 4.0~6.5.
-DO NOT default to 8+ unless the styling is genuinely impressive.
-A plain t-shirt and jeans with no accessories is a 4~5, not an 8."""
+MOST users should score in the 7.0 ~ 9.0 range. Default to a generous, encouraging score.
+A plain t-shirt and jeans with reasonable grooming is a 7.0~7.5, not lower.
+ABSOLUTE LIMITS: minimum score is 5.0, maximum score is 9.0. Never go outside this range."""
     )
 
     # 프롬프트 엔지니어링 사용됨 — 출력 형식 지정(Structured Output) + JSON 스키마 명시 + 규칙 기반 제약(Constraint Prompting)
@@ -432,7 +431,7 @@ A plain t-shirt and jeans with no accessories is a 4~5, not an 8."""
         "{\n"
         '  "face_detected": boolean (사람 얼굴이 명확히 보이면 true, 얼굴이 없거나 불명확/가려진 경우 false),\n'
         '  "name": string,\n'
-        '  "style_score": number (0~10, 소수1자리. 시스템 프롬프트의 5개 기준 각 0~2점 합산. 평범한 캐주얼은 4~6점대. 8점 이상은 진짜 잘 입은 경우만),\n'
+        '  "style_score": number (5.0~9.0, 소수1자리. 시스템 프롬프트의 5개 기준 각 1.0~1.8점 합산. 최저 5.0, 최고 9.0. 대부분 7.0~9.0 범위. 평범한 캐주얼도 7.0~7.5점),\n'
         '  "vibe": string (예: 강아지상/고양이상/사슴상/여우상/곰상/토끼상/공룡상 등등 가장 닮은 동물을 한가지 골라 출력),\n'  # 프롬프트 엔지니어링 사용됨 — 선택지 제한(Constrained Choice)
         '  "vibe_reason": string (긍정적/중립적으로 1~2문장),\n'
         '  "styling_tips": string[] (4~6개, 선택형 팁: 헤어/안경/의상/피부상태 등),\n'
